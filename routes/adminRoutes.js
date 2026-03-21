@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const { authenticate, requiredAdmin } = require('../middleware/authMiddleware');
+const { authenticate, requiredAdmin, requiredOfficer } = require('../middleware/authMiddleware');
 
 router.post('/officers', authenticate, requiredAdmin, adminController.createOfficer);
+router.post('/officers/register-admin', authenticate, requiredOfficer, adminController.registerAdminFromOfficer);
 router.get('/officers', authenticate, requiredAdmin, adminController.getAllOfficers);
 router.get('/officers/:id', authenticate, requiredAdmin, adminController.getOfficerById);
 router.put('/officers/:id', authenticate, requiredAdmin, adminController.updateOfficer);

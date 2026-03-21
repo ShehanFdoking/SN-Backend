@@ -39,6 +39,73 @@ exports.createOfficer = async (req, res) => {
   }
 };
 
+exports.registerAdminFromOfficer = async (req, res) => {
+  try {
+    const { email, adminPromotionKey } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ message: 'No officer account found with this email' });
+    }
+
+    const requesterRole = req.user?.role;
+    const isRequesterAdmin = requesterRole === 'admin';
+    const isRequesterOfficer = requesterRole === 'officer';
+
+    if (!isRequesterAdmin && !isRequesterOfficer) {
+      return res.status(403).json({ message: 'Insufficient permissions' });
+    }
+
+    if (isRequesterOfficer) {
+      const expectedPromotionKey = process.env.ADMIN_PROMOTION_KEY;
+      if (!expectedPromotionKey) {
+        return res.status(503).json({ message: 'Admin promotion is not configured' });
+      }
+
+      if (adminPromotionKey !== expectedPromotionKey) {
+        return res.status(403).json({ message: 'Invalid admin registration key' });
+      }
+
+      // Officer dashboard flow: only allow promoting the currently authenticated officer.
+      const sameUser = String(user._id) === String(req.user._id);
+      const sameEmail = user.email?.toLowerCase() === req.user.email?.toLowerCase();
+
+      if (!sameUser || !sameEmail) {
+        return res.status(403).json({ message: 'You can only register your own officer account as admin' });
+      }
+    }
+
+    if (user.role === 'admin') {
+      return res.status(400).json({ message: 'User is already an admin' });
+    }
+
+    if (user.role !== 'officer') {
+      return res.status(400).json({ message: 'Only officer accounts can be promoted to admin' });
+    }
+
+    user.role = 'admin';
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.status(200).json({
+      message: 'Officer role changed to admin successfully',
+      user: {
+        id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
 exports.getAllOfficers = async (req, res) => {
   try {
     const officers = await User.find({ role: 'officer' })

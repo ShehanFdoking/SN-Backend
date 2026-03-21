@@ -9,8 +9,26 @@ dotenv.config();
 const app = express();
 
 // Middleware
+const allowedOrigins = (
+  process.env.FRONTEND_URLS ||
+  process.env.FRONTEND_URL ||
+  'https://sn-frontend-beta.vercel.app'
+)
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'https://sn-frontend-beta.vercel.app',
+  origin: (origin, callback) => {
+    // Allow tools and same-origin requests without an Origin header.
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 };
 
