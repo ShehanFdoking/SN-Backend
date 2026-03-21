@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const OfficerHistory = require('../models/OfficerHistory');
+const AdminPromotionRequest = require('../models/AdminPromotionRequest');
 
 exports.createOfficer = async (req, res) => {
   try {
@@ -39,68 +40,130 @@ exports.createOfficer = async (req, res) => {
   }
 };
 
-exports.registerAdminFromOfficer = async (req, res) => {
+exports.createAdminPromotionRequest = async (req, res) => {
   try {
-    const { email, adminPromotionKey } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ message: 'Email is required' });
+    const officer = await User.findById(req.user._id);
+    if (!officer) {
+      return res.status(404).json({ message: 'User not found' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(404).json({ message: 'No officer account found with this email' });
+    if (officer.role !== 'officer') {
+      return res.status(403).json({ message: 'Only officers can request admin access' });
     }
 
-    const requesterRole = req.user?.role;
-    const isRequesterAdmin = requesterRole === 'admin';
-    const isRequesterOfficer = requesterRole === 'officer';
+    const existingPending = await AdminPromotionRequest.findOne({
+      officerId: officer._id,
+      status: 'pending'
+    });
 
-    if (!isRequesterAdmin && !isRequesterOfficer) {
-      return res.status(403).json({ message: 'Insufficient permissions' });
+    if (existingPending) {
+      return res.status(400).json({ message: 'You already have a pending admin access request' });
     }
 
-    if (isRequesterOfficer) {
-      const expectedPromotionKey = process.env.ADMIN_PROMOTION_KEY;
-      if (!expectedPromotionKey) {
-        return res.status(503).json({ message: 'Admin promotion is not configured' });
-      }
+    const request = await AdminPromotionRequest.create({
+      officerId: officer._id,
+      email: officer.email,
+      note: req.body?.note || ''
+    });
 
-      if (adminPromotionKey !== expectedPromotionKey) {
-        return res.status(403).json({ message: 'Invalid admin registration key' });
-      }
+    res.status(201).json({
+      message: 'Admin access request submitted successfully',
+      request
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
 
-      // Officer dashboard flow: only allow promoting the currently authenticated officer.
-      const sameUser = String(user._id) === String(req.user._id);
-      const sameEmail = user.email?.toLowerCase() === req.user.email?.toLowerCase();
+exports.getAdminPromotionRequests = async (req, res) => {
+  try {
+    const { status = 'pending' } = req.query;
+    const filter = status === 'all' ? {} : { status };
 
-      if (!sameUser || !sameEmail) {
-        return res.status(403).json({ message: 'You can only register your own officer account as admin' });
-      }
+    const requests = await AdminPromotionRequest.find(filter)
+      .populate('officerId', 'firstName lastName email role isActive')
+      .populate('resolvedBy', 'firstName lastName email')
+      .sort({ requestedAt: -1 });
+
+    res.status(200).json(requests);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+exports.approveAdminPromotionRequest = async (req, res) => {
+  try {
+    const request = await AdminPromotionRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: 'Request not found' });
     }
 
-    if (user.role === 'admin') {
-      return res.status(400).json({ message: 'User is already an admin' });
+    if (request.status !== 'pending') {
+      return res.status(400).json({ message: `Request is already ${request.status}` });
     }
 
-    if (user.role !== 'officer') {
-      return res.status(400).json({ message: 'Only officer accounts can be promoted to admin' });
+    const officer = await User.findById(request.officerId);
+    if (!officer) {
+      request.status = 'rejected';
+      request.note = 'Officer account no longer exists';
+      request.resolvedAt = Date.now();
+      request.resolvedBy = req.user._id;
+      await request.save();
+      return res.status(404).json({ message: 'Officer account not found. Request rejected.' });
     }
 
-    user.role = 'admin';
-    user.updatedAt = Date.now();
-    await user.save();
+    if (officer.role !== 'officer') {
+      request.status = 'rejected';
+      request.note = 'Officer role no longer eligible for promotion';
+      request.resolvedAt = Date.now();
+      request.resolvedBy = req.user._id;
+      await request.save();
+      return res.status(400).json({ message: 'User is not an officer anymore. Request rejected.' });
+    }
+
+    officer.role = 'admin';
+    officer.updatedAt = Date.now();
+    await officer.save();
+
+    request.status = 'approved';
+    request.resolvedAt = Date.now();
+    request.resolvedBy = req.user._id;
+    await request.save();
 
     res.status(200).json({
-      message: 'Officer role changed to admin successfully',
+      message: 'Admin promotion request approved',
       user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role
-      }
+        id: officer._id,
+        firstName: officer.firstName,
+        lastName: officer.lastName,
+        email: officer.email,
+        role: officer.role
+      },
+      request
     });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+exports.rejectAdminPromotionRequest = async (req, res) => {
+  try {
+    const request = await AdminPromotionRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: 'Request not found' });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({ message: `Request is already ${request.status}` });
+    }
+
+    request.status = 'rejected';
+    request.note = req.body?.note || request.note;
+    request.resolvedAt = Date.now();
+    request.resolvedBy = req.user._id;
+    await request.save();
+
+    res.status(200).json({ message: 'Admin promotion request rejected', request });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
