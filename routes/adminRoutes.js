@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const { authenticate, requiredAdmin } = require('../middleware/authMiddleware');
+const { authenticate, requiredAdmin, requiredOfficer } = require('../middleware/authMiddleware');
 
 router.post('/officers', authenticate, requiredAdmin, adminController.createOfficer);
+router.post('/admin-promotion-requests', authenticate, requiredOfficer, adminController.createAdminPromotionRequest);
+router.get('/admin-promotion-requests', authenticate, requiredAdmin, adminController.getAdminPromotionRequests);
+router.post('/admin-promotion-requests/:id/approve', authenticate, requiredAdmin, adminController.approveAdminPromotionRequest);
+router.post('/admin-promotion-requests/:id/reject', authenticate, requiredAdmin, adminController.rejectAdminPromotionRequest);
 router.get('/officers', authenticate, requiredAdmin, adminController.getAllOfficers);
 router.get('/officers/:id', authenticate, requiredAdmin, adminController.getOfficerById);
 router.put('/officers/:id', authenticate, requiredAdmin, adminController.updateOfficer);

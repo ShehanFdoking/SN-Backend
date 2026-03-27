@@ -4,6 +4,15 @@ const jwt = require('jsonwebtoken');
 exports.register = async (req, res) => {
   try {
     const { firstName, lastName, email, password, phone, role } = req.body;
+    const normalizedRole = role ? String(role).toLowerCase() : 'user';
+
+    if (normalizedRole === 'admin') {
+      return res.status(403).json({ message: 'Admin registration is not allowed here' });
+    }
+
+    if (!['user', 'officer'].includes(normalizedRole)) {
+      return res.status(400).json({ message: 'Invalid role selected' });
+    }
 
     // Check if user exists
     let user = await User.findOne({ email });
@@ -18,7 +27,7 @@ exports.register = async (req, res) => {
       email,
       password,
       phone,
-      role: role || 'user'
+      role: normalizedRole
     });
 
     await user.save();
@@ -103,3 +112,4 @@ exports.getCurrentUser = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
+
